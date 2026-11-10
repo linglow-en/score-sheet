@@ -307,7 +307,7 @@ function statusOf(score){
 }
 function go(hash){ location.hash = hash; }
 function back(){ history.back(); }
-function headerHTML(adminBtn, teacherName){
+function headerHTML(teacherName){
   let h = '<div class="topbar"><div><h1>دفتر <em>نمرات</em></h1><div class="hmeta">';
   if (teacherName) h += '<span class="teacher-chip">استاد ' + esc(teacherName) + '</span>';
   h += '<span class="academy">Salehi Language Academy</span></div></div><div class="spacer"></div></div>';
@@ -323,9 +323,9 @@ function teacherSwitchHTML(teachers, curUsername){
   teachers.forEach(t => { h += '<button class="tchip' + (t.username === curUsername ? ' on' : '') + '" onclick="go(\'#/t/' + esc(t.username) + '\')">' + esc(t.displayName) + '</button>'; });
   return h + '</div>';
 }
-function footHTML(){ return '<div class="foot">Linglow — دفتر نمرات زبانسرای صالحی<br>Salehi Language Academy<br><a href="https://linglow-en.github.io/score-sheet-admin/">معلم هستی؟ ورود به پنل معلم‌ها</a></div>'; }
+function footHTML(){ return '<div class="foot">Linglow — دفتر نمرات زبانسرای صالحی<br>Salehi Language Academy</div>'; }
 function classesView(t, isHome){
-  let h = headerHTML(false, t.displayName);
+  let h = headerHTML(t.displayName);
   if (!isHome) h += backHTML();
   h += '<div class="pick-head"><h2>کلاس‌ها</h2><span class="bar"></span><span>روی کلاس خودت بزن تا اسم‌ها و نمره‌ها را ببینی</span></div>';
   h += teacherSwitchHTML(sortedTeachers(), t.username);
@@ -341,15 +341,15 @@ function classesView(t, isHome){
 function viewHome(){
   const teachers = sortedTeachers();
   const cur = teachers.find(t => t.username === 'mohammad') || teachers[0];
-  if (!cur) return headerHTML(false, null) + '<div class="empty">هنوز معلمی ثبت‌نام نکرده است.<br>معلم‌ها از «پنل معلم‌ها» ثبت‌نام می‌کنند.</div>' + footHTML();
+  if (!cur) return headerHTML(null) + '<div class="empty">هنوز کلاسی برای نمایش وجود ندارد.</div>' + footHTML();
   return classesView(cur, true);
 }
 function viewClassStudents(username, classId){
   const t = findTeacherByUsername(username);
   const c = t && t.classes.find(x => x.id === classId);
-  if (!t || !c) return headerHTML(false) + backHTML() + '<div class="empty">این کلاس پیدا نشد.</div>';
+  if (!t || !c) return headerHTML() + backHTML() + '<div class="empty">این کلاس پیدا نشد.</div>';
   window._ctx = { u: t.username, c: c.id };
-  let h = headerHTML(false, t.displayName) + backHTML();
+  let h = headerHTML(t.displayName) + backHTML();
   h += '<h1 class="page">' + esc(levelLabel(c.kind, c.level)) + ' — ' + esc(t.displayName) + '</h1>';
   h += '<p class="lead">کتاب: ' + esc(c.book) + ' · ' + classCountLabel(c.students.length) + '<br>روی اسم خودت بزن تا نمره‌ت رو ببینی.</p>';
   if (!c.students.length) h += '<div class="empty">هنوز دانش‌آموزی توی این کلاس ثبت نشده است.</div>';
@@ -366,9 +366,9 @@ function viewReport(username, classId, studentId){
   const t = findTeacherByUsername(username);
   const c = t && t.classes.find(x => x.id === classId);
   const s = c && c.students.find(x => x.id === studentId);
-  if (!t || !c || !s) return headerHTML(false) + backHTML() + '<div class="empty">این کارنامه پیدا نشد.</div>';
+  if (!t || !c || !s) return headerHTML() + backHTML() + '<div class="empty">این کارنامه پیدا نشد.</div>';
   const st = statusOf(s.score);
-  let h = headerHTML(false, t.displayName) + backHTML();
+  let h = headerHTML(t.displayName) + backHTML();
   h += '<div class="rc"><div class="rc-head"><div class="t1">دفتر نمرات</div><div class="t2">Salehi Language Academy — Linglow</div></div><div class="rc-body">';
   h += '<div class="rc-name">' + esc(s.name) + '</div>';
   h += '<div class="rc-meta">کلاس ' + esc(levelLabel(c.kind, c.level)) + ' · ' + esc(c.book) + '<br>مدرس: ' + esc(t.displayName) + '</div>';
@@ -413,7 +413,7 @@ window.addEventListener('popstate', function(){ hideNoScorePopup(); });
 /* ================= Router ================= */
 function render(){
   const app = document.getElementById('app');
-  if (!DB){ app.innerHTML = headerHTML(false) + '<div class="empty">⏳ در حال بارگذاری…</div>'; return; }
+  if (!DB){ app.innerHTML = headerHTML() + '<div class="empty">⏳ در حال بارگذاری…</div>'; return; }
   const raw = (location.hash || '#/').replace(/^#\/?/, '');
   const p = raw.split('/').filter(s => s !== '');
   let html;
