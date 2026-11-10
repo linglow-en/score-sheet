@@ -73,6 +73,8 @@ p.lead{font-size:15.5px;font-weight:500;color:var(--muted);margin:0 2px 18px;lin
 .cc-count{font-size:12px;color:#a9b78d}
 .cc-arrow{margin-inline-start:auto;flex:0 0 auto;width:34px;height:34px;border-radius:50%;background:var(--lime);color:var(--lime-ink);display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:900;line-height:1}
 .rowbtns{display:flex;gap:8px;margin-top:12px;position:relative;z-index:1}
+.tcard{min-height:180px;justify-content:space-between}
+.tcard-name{font-weight:900;font-size:30px;line-height:1.35;padding:20px 0;position:relative;z-index:1}
 .iconbtn{flex:1;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);color:var(--ink);font-weight:800;font-size:15px;padding:9px 6px;display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .iconbtn.del{border-color:var(--red);color:#f0998f}
 /* ===== teacher rows (compat) ===== */
@@ -340,9 +342,25 @@ function classesView(t, isHome){
 }
 function viewHome(){
   const teachers = sortedTeachers();
-  const cur = teachers.find(t => t.username === 'mohammad') || teachers[0];
-  if (!cur) return headerHTML(null) + '<div class="empty">هنوز کلاسی برای نمایش وجود ندارد.</div>' + footHTML();
-  return classesView(cur, true);
+  let h = headerHTML(null);
+  h += '<div class="pick-head"><h2>معلم‌ها</h2><span class="bar"></span><span>روی اسم معلمت بزن تا کلاس‌هاش رو ببینی</span></div>';
+  if (!teachers.length) h += '<div class="empty">هنوز کلاسی برای نمایش وجود ندارد.</div>';
+  h += '<div class="grid">';
+  teachers.forEach(t => {
+    h += '<a class="cardlink" href="#/t/' + esc(t.username) + '"><div class="card tcard">' +
+      '<div class="cc-top"><span class="series">استاد</span></div>' +
+      '<div class="tcard-name">' + esc(t.displayName) + '</div>' +
+      '<div class="cc-bottom"><span class="cc-info"><span class="cc-count">' + faNum(t.classes.length) + ' کلاس · ' + faNum(teacherClassCount(t)) + ' زبان‌آموز</span></span>' +
+      '<span class="cc-arrow" aria-hidden="true">&#8592;</span></div>' +
+      '</div></a>';
+  });
+  h += '</div>' + footHTML();
+  return h;
+}
+function viewTeacherClasses(username){
+  const t = findTeacherByUsername(username);
+  if (!t) return headerHTML(null) + backHTML() + '<div class="empty">چنین معلمی پیدا نشد.</div>';
+  return classesView(t, false);
 }
 function viewClassStudents(username, classId){
   const t = findTeacherByUsername(username);
