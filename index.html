@@ -122,6 +122,12 @@ p.lead{font-size:19px;font-weight:700;color:#444;margin:0 2px 22px;line-height:1
 .rc .noscore .big{font-size:64px}
 .rc .noscore p{font-weight:900;font-size:26px;margin-top:8px;line-height:1.6}
 .rc .noscore span{display:block;font-weight:700;font-size:17px;color:#555;margin-top:6px}
+/* ===== popup ===== */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:100;padding:20px}
+.popup{background:#fff;border:3px solid var(--ink);border-radius:26px;max-width:420px;width:100%;padding:30px 26px;text-align:center;box-shadow:8px 8px 0 var(--ink)}
+.popup .big{font-size:60px}
+.popup h3{font-weight:900;font-size:26px;margin-top:8px;line-height:1.5}
+.popup p{font-weight:700;font-size:17px;color:#555;margin-top:8px;line-height:1.8}
 /* ===== FAB ===== */
 .fab{position:fixed;bottom:26px;right:26px;z-index:50;display:inline-flex;align-items:center;gap:10px;background:var(--ink);color:#fff;border:3px solid var(--ink);border-radius:999px;padding:16px 26px;font-weight:900;font-size:20px;box-shadow:0 8px 24px rgba(0,0,0,.35)}
 .fab .plus{width:34px;height:34px;border-radius:50%;background:var(--lime);color:var(--ink);display:inline-flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;line-height:1}
@@ -143,6 +149,7 @@ p.lead{font-size:19px;font-weight:700;color:#444;margin:0 2px 22px;line-height:1
 </head>
 <body>
 <div class="wrap" id="app"></div>
+<div id="modal-root"></div>
 <script>
 'use strict';
 /* ================= Seed (teachers/classes from the previous personal site) ================= */
@@ -167,9 +174,11 @@ function coverHTML(book, big){
   if (c) return '<img src="' + c + '" alt="">';
   return '<div class="designed" style="background:' + bookColor(book) + '"><div class="big">' + esc(bookShort(book)) + '</div><div class="ser">' + esc(book) + '</div></div>';
 }
-/* ================= Store (localStorage for now) ================= */
+/* ================= Store (Google Sheet API + local cache) ================= */
+const API_URL = 'https://script.google.com/macros/s/AKfycbwSHhNVrsM3_B6By1aIsnXwPvdUNZPwFCawXutTHLmndkDtWC8_OegFAZvRPPCfO9Iv/exec';
 const LS_KEY = 'linglow-v1';
 const LS_SESSION = 'linglow-session';
+let DB = null;
 function uid(){ return 'id-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 function hashPw(u, p){
   let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
@@ -198,25 +207,44 @@ function seedDB(){
   });
   return { teachers: [t] };
 }
-function loadDB(){
+function loadCache(){
   try {
     const raw = localStorage.getItem(LS_KEY);
-    if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.teachers)) return d; }
+    if (raw){ const d = JSON.parse(raw); if (d && Array.isArray(d.teachers)) return d; }
   } catch (e) {}
-  const d = seedDB();
-  try { localStorage.setItem(LS_KEY, JSON.stringify(d)); } catch (e) {}
-  return d;
+  return null;
 }
-let DB = loadDB();
-function saveDB(){ try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); } catch (e) {} }
-function getSession(){ try { return localStorage.getItem(LS_SESSION); } catch (e) { return null; } }
-function setSession(id){ try { if (id) localStorage.setItem(LS_SESSION, id); else localStorage.removeItem(LS_SESSION); } catch (e) {} }
+function saveCache(){ try { localStorage.setItem(LS_KEY, JSON.stringify(DB)); } catch (e) {} }
+async function apiGet(action){
+  const r = await fetch(API_URL + '?action=' + action);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function apiPost(action, payload){
+  const r = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(Object.assign({ action: action }, payload)) });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+async function refreshDB(){
+  try {
+    const data = await apiGet('read');
+    if (data && Array.isArray(data.teachers)){ DB = data; saveCache(); }
+    else if (!DB){ DB = loadCache() || seedDB(); }
+  } catch (e){
+    if (!DB){ DB = loadCache() || seedDB(); }
+  }
+  render();
+}
+function getSession(){
+  try { const raw = localStorage.getItem(LS_SESSION); return raw ? JSON.parse(raw) : null; } catch (e){ return null; }
+}
+function setSession(s){ try { if (s) localStorage.setItem(LS_SESSION, JSON.stringify(s)); else localStorage.removeItem(LS_SESSION); } catch (e){} }
 function currentTeacher(){
-  const sid = getSession();
-  if (!sid) return null;
-  return DB.teachers.find(t => t.id === sid) || null;
+  const s = getSession();
+  if (!s || !s.username || !DB) return null;
+  return DB.teachers.find(t => t.username === s.username) || null;
 }
-function findTeacherByUsername(u){ return DB.teachers.find(t => t.username === u); }
+function findTeacherByUsername(u){ return DB ? DB.teachers.find(t => t.username === u) : undefined; }
 /* ================= Helpers ================= */
 function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 function faNum(n){ return String(n).replace(/\d/g, d => '۰۱۲۳۴۵۶۷۸۹'[+d]); }
@@ -233,7 +261,7 @@ function headerHTML(adminBtn){
     '<div><div class="brand">LING<b>LOW</b> <span style="font-size:20px">| دفتر نمرات</span></div>' +
     '<div class="sub">Salehi Language Academy — زبانسرای صالحی</div></div>' +
     '<div class="spacer"></div>' +
-    (adminBtn ? '<button class="btn ghost small" onclick="go(\'#/admin\')">👩‍🏫 پنل معلم‌ها</button>' : '') +
+    '' +
   '</div>';
 }
 function backHTML(){ return '<button class="backbtn" onclick="back()">› بازگشت</button>'; }
@@ -242,7 +270,7 @@ function teacherClassCount(t){ return t.classes.reduce((a, c) => a + c.students.
 /* ================= Student views ================= */
 function viewHome(){
   const teachers = DB.teachers.slice().sort((a, b) => a.displayName.localeCompare(b.displayName, 'fa'));
-  let h = headerHTML(true);
+  let h = headerHTML(false);
   h += '<h1 class="page">معلمت رو انتخاب کن</h1>';
   h += '<p class="lead">روی اسم معلمت بزن، کلاست رو پیدا کن و نمره‌ت رو ببین.</p>';
   if (!teachers.length){
@@ -256,13 +284,13 @@ function viewHome(){
       '<span class="meta" style="display:block">' + faNum(t.classes.length) + ' کلاس · ' + faNum(teacherClassCount(t)) + ' زبان‌آموز</span></span>' +
       '<span class="chev">‹</span></button>';
   });
-  h += '<div class="foot">Linglow — دفتر نمرات زبانسرای صالحی<br>Salehi Language Academy</div>';
+  h += '<div class="foot">Linglow — دفتر نمرات زبانسرای صالحی<br>Salehi Language Academy<br><a href="https://linglow-en.github.io/score-sheet-admin/" style="text-decoration:underline">معلم هستی؟ ورود به پنل معلم‌ها</a></div>';
   return h;
 }
 function viewTeacherClasses(username){
   const t = findTeacherByUsername(username);
-  if (!t) return headerHTML(true) + backHTML() + '<div class="empty">چنین معلمی پیدا نشد.</div>';
-  let h = headerHTML(true) + backHTML();
+  if (!t) return headerHTML(false) + backHTML() + '<div class="empty">چنین معلمی پیدا نشد.</div>';
+  let h = headerHTML(false) + backHTML();
   h += '<h1 class="page">' + esc(t.displayName) + '</h1>';
   h += '<p class="lead">کلاس‌های ' + esc(t.displayName) + ' — روی کلاست بزن تا اسمت رو پیدا کنی.</p>';
   if (!t.classes.length) h += '<div class="empty">این معلم هنوز کلاسی نساخته است.</div>';
@@ -281,13 +309,14 @@ function viewTeacherClasses(username){
 function viewClassStudents(username, classId){
   const t = findTeacherByUsername(username);
   const c = t && t.classes.find(x => x.id === classId);
-  if (!t || !c) return headerHTML(true) + backHTML() + '<div class="empty">این کلاس پیدا نشد.</div>';
-  let h = headerHTML(true) + backHTML();
+  if (!t || !c) return headerHTML(false) + backHTML() + '<div class="empty">این کلاس پیدا نشد.</div>';
+  window._ctx = { u: t.username, c: c.id };
+  let h = headerHTML(false) + backHTML();
   h += '<h1 class="page">' + esc(levelLabel(c.kind, c.level)) + ' — ' + esc(t.displayName) + '</h1>';
   h += '<p class="lead">کتاب: ' + esc(c.book) + ' · ' + classCountLabel(c.students.length) + '<br>روی اسم خودت بزن تا نمره‌ت رو ببینی.</p>';
   if (!c.students.length) h += '<div class="empty">هنوز دانش‌آموزی توی این کلاس ثبت نشده است.</div>';
   c.students.slice().sort((a, b) => a.name.localeCompare(b.name, 'fa')).forEach(s => {
-    h += '<button class="srow" onclick="go(\'#/t/' + esc(t.username) + '/c/' + c.id + '/s/' + s.id + '\')">' +
+    h += '<button class="srow" onclick="studentTap(\'' + s.id + '\')">' +
       '<span class="nm">' + esc(s.name) + '</span>' +
       '<span class="sc">' + (s.score == null ? 'بدون نمره' : 'نمره: <b>' + faNum(s.score) + '</b>') + '</span>' +
       '<span class="chev">‹</span></button>';
@@ -298,9 +327,9 @@ function viewReport(username, classId, studentId){
   const t = findTeacherByUsername(username);
   const c = t && t.classes.find(x => x.id === classId);
   const s = c && c.students.find(x => x.id === studentId);
-  if (!t || !c || !s) return headerHTML(true) + backHTML() + '<div class="empty">این کارنامه پیدا نشد.</div>';
+  if (!t || !c || !s) return headerHTML(false) + backHTML() + '<div class="empty">این کارنامه پیدا نشد.</div>';
   const st = statusOf(s.score);
-  let h = headerHTML(true) + backHTML();
+  let h = headerHTML(false) + backHTML();
   h += '<div class="rc"><div class="rc-head"><div class="t1">دفتر نمرات</div><div class="t2">Salehi Language Academy — Linglow</div></div><div class="rc-body">';
   h += '<div class="rc-name">' + esc(s.name) + '</div>';
   h += '<div class="rc-meta">کلاس ' + esc(levelLabel(c.kind, c.level)) + ' · ' + esc(c.book) + '<br>مدرس: ' + esc(t.displayName) + '</div>';
@@ -314,240 +343,38 @@ function viewReport(username, classId, studentId){
   h += '</div></div>';
   return h;
 }
-/* ================= Admin: auth ================= */
-let authMode = 'login';
-let authError = '';
-function viewAdmin(){
-  const me = currentTeacher();
-  if (me) return viewAdminHome(me);
-  let h = headerHTML(false) + backHTML();
-  h += '<h1 class="page">پنل معلم‌ها</h1>';
-  h += '<p class="lead">اگه قبلاً ثبت‌نام کردی وارد شو؛ اگه معلم جدیدی هستی، اول ثبت‌نام کن تا اسمت توی سایت بیاد.</p>';
-  h += '<div class="authtabs"><button class="' + (authMode === 'login' ? 'on' : '') + '" onclick="authMode=\'login\';authError=\'\';render()">ورود</button>' +
-       '<button class="' + (authMode === 'register' ? 'on' : '') + '" onclick="authMode=\'register\';authError=\'\';render()">ثبت‌نام معلم جدید</button></div>';
-  h += '<div class="panel">';
-  if (authMode === 'login'){
-    h += '<h2>ورود به پنل خودت</h2><div class="hint">با یوزرنیم و پسوردی که موقع ثبت‌نام انتخاب کردی وارد شو.</div>' +
-      '<div class="field"><label>یوزرنیم</label><input type="text" id="li-user" dir="ltr" style="text-align:left" placeholder="username" autocomplete="username"></div>' +
-      '<div class="field"><label>پسورد</label><input type="password" id="li-pass" placeholder="••••••••" autocomplete="current-password"></div>' +
-      '<div id="li-setpw"></div>' +
-      (authError ? '<div class="err">' + esc(authError) + '</div>' : '') +
-      '<div style="margin-top:20px"><button class="btn lime" style="width:100%;justify-content:center" onclick="doLogin()">ورود</button></div>';
-  } else {
-    h += '<h2>ثبت‌نام معلم جدید</h2><div class="hint">یک بار برای همیشه ثبت‌نام می‌کنی؛ از دفعه‌های بعد با همین یوزرنیم و پسورد وارد پنلت می‌شی و اسمت توی سایت دانش‌آموزها دیده می‌شه.</div>' +
-      '<div class="field"><label>اسم نمایشی <span class="req">*</span> <span style="font-weight:700;color:#555">(همون اسمی که دانش‌آموزها می‌بینن)</span></label><input type="text" id="rg-name" placeholder="مثلاً محمد شولی"></div>' +
-      '<div class="field"><label>یوزرنیم <span class="req">*</span> <span style="font-weight:700;color:#555">(انگلیسی، حروف کوچک و عدد — برای ورود)</span></label><input type="text" id="rg-user" dir="ltr" style="text-align:left" placeholder="مثلاً mohammad"></div>' +
-      '<div class="field"><label>پسورد <span class="req">*</span></label><input type="password" id="rg-pass" placeholder="حداقل ۶ کاراکتر" autocomplete="new-password"></div>' +
-      '<div class="field"><label>تکرار پسورد <span class="req">*</span></label><input type="password" id="rg-pass2" placeholder="پسورد رو دوباره بنویس" autocomplete="new-password"></div>' +
-      (authError ? '<div class="err">' + esc(authError) + '</div>' : '') +
-      '<div style="margin-top:20px"><button class="btn lime" style="width:100%;justify-content:center" onclick="doRegister()">ثبت‌نام و ورود به پنل</button></div>';
-  }
-  h += '</div>';
-  return h;
+function studentTap(studentId){
+  const ctx = window._ctx; if (!ctx) return;
+  const t = findTeacherByUsername(ctx.u);
+  const c = t && t.classes.find(x => x.id === ctx.c);
+  const st = c && c.students.find(x => x.id === studentId);
+  if (!st) return;
+  if (st.score == null){ showNoScorePopup(st.name); }
+  else { go('#/t/' + encodeURIComponent(ctx.u) + '/c/' + ctx.c + '/s/' + st.id); }
 }
-function doLogin(){
-  const u = (document.getElementById('li-user').value || '').trim().toLowerCase();
-  const p = document.getElementById('li-pass').value || '';
-  const t = findTeacherByUsername(u);
-  if (!t){ authError = 'چنین یوزرنیمی ثبت نشده است. اگه معلم جدیدی هستی، از تب «ثبت‌نام معلم جدید» ثبت‌نام کن.'; render(); return; }
-  if (t.passHash == null){
-    const box = document.getElementById('li-setpw');
-    if (!box.querySelector('input')){
-      box.innerHTML = '<div class="field"><label>این حساب هنوز رمز ندارد — رمز عبور خودت رو تعیین کن <span class="req">*</span></label>' +
-        '<input type="password" id="li-newpass" placeholder="رمز جدید (حداقل ۶ کاراکتر)" autocomplete="new-password"></div>' +
-        '<div class="field"><label>تکرار رمز جدید</label><input type="password" id="li-newpass2" placeholder="رمز رو دوباره بنویس" autocomplete="new-password"></div>' +
-        '<div class="hint" style="margin-top:10px">رمز رو بنویس و دوباره دکمه‌ی ورود رو بزن.</div>';
-      return;
-    }
-    const np = document.getElementById('li-newpass').value || '';
-    const np2 = document.getElementById('li-newpass2').value || '';
-    if (np.length < 6){ authError = 'رمز باید حداقل ۶ کاراکتر باشه.'; render(); return; }
-    if (np !== np2){ authError = 'تکرار رمز با رمز یکی نیست.'; render(); return; }
-    t.passHash = hashPw(u, np); saveDB(); setSession(t.id); authError = ''; render(); return;
-  }
-  if (hashPw(u, p) !== t.passHash){ authError = 'پسورد اشتباهه. دوباره امتحان کن.'; render(); return; }
-  setSession(t.id); authError = ''; render();
-}
-function doRegister(){
-  const name = (document.getElementById('rg-name').value || '').trim();
-  const u = (document.getElementById('rg-user').value || '').trim().toLowerCase();
-  const p = document.getElementById('rg-pass').value || '';
-  const p2 = document.getElementById('rg-pass2').value || '';
-  if (!name){ authError = 'اسم نمایشی رو بنویس.'; render(); return; }
-  if (!/^[a-z0-9][a-z0-9\-_]{2,30}$/.test(u)){ authError = 'یوزرنیم باید انگلیسی باشه: با حرف یا عدد شروع بشه و فقط حروف کوچک، عدد، خط تیره (-) یا آندرلاین (_) داشته باشه.'; render(); return; }
-  if (findTeacherByUsername(u)){ authError = 'این یوزرنیم قبلاً گرفته شده؛ یه یوزرنیم دیگه انتخاب کن.'; render(); return; }
-  if (p.length < 6){ authError = 'پسورد باید حداقل ۶ کاراکتر باشه.'; render(); return; }
-  if (p !== p2){ authError = 'تکرار پسورد با پسورد یکی نیست.'; render(); return; }
-  const t = { id: uid(), username: u, displayName: name, passHash: hashPw(u, p), classes: [] };
-  DB.teachers.push(t); saveDB(); setSession(t.id); authError = '';
-  render();
-}
-function doLogout(){ setSession(null); go('#/'); }
-/* ================= Admin: home ================= */
-function viewAdminHome(me){
-  let h = headerHTML(false);
-  h += '<div style="display:flex;align-items:center;gap:12px;margin-top:26px;flex-wrap:wrap">' +
-    '<h1 class="page" style="margin:0">سلام ' + esc(me.displayName) + ' 👋</h1>' +
-    '<span style="flex:1"></span><button class="btn small" onclick="doLogout()">خروج</button></div>';
-  h += '<p class="lead">این‌ها کلاس‌های توئه. برای اضافه کردن کلاس جدید، دکمه‌ی «ایجاد کلاس» پایین صفحه رو بزن.</p>';
-  if (!me.classes.length){
-    h += '<div class="empty">هنوز کلاسی نساختی.<br>دکمه‌ی «＋ ایجاد کلاس» پایین صفحه رو بزن و اولین کلاست رو بساز.</div>';
-  }
-  h += '<div class="grid">';
-  me.classes.slice().sort((a, b) => (a.kind === b.kind ? a.level - b.level : (a.kind === 'adult' ? -1 : 1))).forEach(c => {
-    h += '<div class="card"><div class="cover">' + coverHTML(c.book) + '</div>' +
-      '<div class="body"><div class="code">' + esc(levelLabel(c.kind, c.level)) + '</div>' +
-      '<div class="book">' + esc(c.book) + '</div>' +
-      '<span class="count">' + classCountLabel(c.students.length) + '</span>' +
-      '<div class="rowbtns">' +
-      '<button class="iconbtn" onclick="go(\'#/admin/edit/' + c.id + '\')">✏️ ویرایش</button>' +
-      '<button class="iconbtn del" onclick="deleteClass(\'' + c.id + '\')">🗑️ حذف</button>' +
-      '</div></div></div>';
-  });
-  h += '</div>';
-  h += '<button class="fab" onclick="go(\'#/admin/new\')"><span class="plus">＋</span> ایجاد کلاس</button>';
-  return h;
-}
-function deleteClass(id){
-  const me = currentTeacher(); if (!me) return;
-  const c = me.classes.find(x => x.id === id); if (!c) return;
-  if (!confirm('کلاس «' + levelLabel(c.kind, c.level) + '» با ' + c.students.length + ' دانش‌آموز حذف بشه؟ این کار برگشت‌پذیر نیست.')) return;
-  me.classes = me.classes.filter(x => x.id !== id);
-  saveDB(); render();
-}
-/* ================= Admin: create / edit class ================= */
-let form = null;
-function blankForm(){ return { _key: 'new', editingId: null, kind: '', level: '', book: '', students: [] }; }
-function loadForm(editId){
-  if (editId){
-    const me = currentTeacher();
-    const c = me && me.classes.find(x => x.id === editId);
-    if (!c) return null;
-    return { _key: 'edit:' + editId, editingId: editId, kind: c.kind, level: String(c.level), book: c.book,
-      students: c.students.map(s => ({ id: s.id, name: s.name, score: s.score, _edit: false })) };
-  }
-  return blankForm();
-}
-function bookOptions(kind){ return kind === 'adult' ? BOOKS_ADULT : (kind === 'teen' ? BOOKS_TEEN : []); }
-function viewClassForm(editId){
-  const me = currentTeacher();
-  if (!me) return viewAdmin();
-  const key = editId ? 'edit:' + editId : 'new';
-  if (!form || form._key !== key) { form = loadForm(editId); if (!form) return viewAdminHome(me); }
-  const isEdit = !!editId;
-  let h = headerHTML(false) + backHTML();
-  h += '<h1 class="page">' + (isEdit ? 'ویرایش کلاس' : 'ایجاد کلاس جدید') + '</h1>';
-  h += '<p class="lead">قدم‌به‌قدم جلو برو: اول نوع کلاس، بعد شماره‌ی لول، بعد کتاب، و در آخر دانش‌آموزها.</p>';
-  /* step 1: kind */
-  h += '<div class="panel"><h2><span class="stepnum">۱</span>کلاس بزرگساله یا نوجوان؟</h2>' +
-    '<div class="seg">' +
-    '<button class="segcard ' + (form.kind === 'adult' ? 'on' : '') + '" onclick="formKind(\'adult\')">بزرگسال<small>ARC</small></button>' +
-    '<button class="segcard ' + (form.kind === 'teen' ? 'on' : '') + '" onclick="formKind(\'teen\')">نوجوان<small>FF</small></button>' +
+function showNoScorePopup(name){
+  const root = document.getElementById('modal-root');
+  root.innerHTML = '<div class="overlay" onclick="closeNoScorePopup()"><div class="popup" onclick="event.stopPropagation()">' +
+    '<div class="big">🕐</div>' +
+    '<h3>هنوز نمره‌ای به شما اختصاص داده نشده</h3>' +
+    '<p>معلمت هنوز برای این کلاس نمره‌ای ثبت نکرده.<br>به‌زودی نمره‌ت اینجا نشون داده می‌شه.</p>' +
+    '<div style="margin-top:20px"><button class="btn lime" style="width:100%;justify-content:center" onclick="closeNoScorePopup()">باشه</button></div>' +
     '</div></div>';
-  /* step 2: level number */
-  h += '<div class="panel"><h2><span class="stepnum">۲</span>شماره‌ی لول چنده؟</h2>' +
-    '<div class="field"><label>عدد لول <span class="req">*</span></label><select id="f-level" onchange="formLevel(this.value)" ' + (form.kind ? '' : 'disabled') + '>' +
-    '<option value="">— انتخاب کن —</option>';
-  for (let n = 1; n <= 30; n++) h += '<option value="' + n + '"' + (String(n) === String(form.level) ? ' selected' : '') + '>' + faNum(n) + '</option>';
-  h += '</select>' + (form.kind ? '' : '<div class="hint" style="margin-top:8px">اول نوع کلاس رو انتخاب کن.</div>') + '</div></div>';
-  /* step 3: book */
-  h += '<div class="panel"><h2><span class="stepnum">۳</span>چه کتابی تدریس می‌کنی؟</h2>';
-  if (!form.kind){
-    h += '<div class="hint">اول نوع کلاس رو انتخاب کن تا کتاب‌های مربوط به همون رده نشون داده بشن.</div>';
-  } else {
-    h += '<div class="hint">' + (form.kind === 'adult' ? 'کتاب‌های American English File:' : 'کتاب‌های Family and Friends:') + '</div><div class="bookgrid">';
-    bookOptions(form.kind).forEach(b => {
-      h += '<button class="bookopt ' + (form.book === b ? 'on' : '') + '" onclick="formBook(\'' + esc(b) + '\')">' +
-        '<span class="bc">' + coverHTML(b) + '</span><span class="bn">' + esc(b) + '</span></button>';
-    });
-    h += '</div>';
-  }
-  h += '</div>';
-  /* step 4: students */
-  h += '<div class="panel"><h2><span class="stepnum">۴</span>دانش‌آموزها</h2>' +
-    '<div class="hint">اسم و فامیل هر دانش‌آموز رو توی یه کادر بنویس. نمره اختیاریه — اگه هنوز نمره ندادی خالی بذار.</div>' +
-    '<div class="addrow"><input type="text" id="f-stu-name" placeholder="اسم و فامیل دانش‌آموز">' +
-    '<input type="number" id="f-stu-score" min="0" max="100" placeholder="نمره (اختیاری)">' +
-    '<button class="btn lime" onclick="formAddStudent()">＋ افزودن</button></div>' +
-    '<div id="f-stu-err"></div>';
-  if (!form.students.length){
-    h += '<div class="empty" style="box-shadow:none">هنوز دانش‌آموزی اضافه نشده.</div>';
-  }
-  form.students.forEach((s, i) => {
-    if (s._edit){
-      h += '<div class="sturow"><input type="text" id="f-edit-name-' + i + '" value="' + esc(s.name) + '">' +
-        '<input type="number" id="f-edit-score-' + i + '" min="0" max="100" placeholder="نمره" value="' + (s.score == null ? '' : s.score) + '">' +
-        '<button class="mini" onclick="formSaveStudent(' + i + ')">✓ ثبت</button>' +
-        '<button class="mini" onclick="formCancelEdit(' + i + ')">✕ لغو</button></div>';
-    } else {
-      h += '<div class="sturow"><span class="nm">' + esc(s.name) + '</span>' +
-        '<span class="sc">' + (s.score == null ? 'بدون نمره' : 'نمره: ' + faNum(s.score)) + '</span><span class="sp"></span>' +
-        '<button class="mini" onclick="formEditStudent(' + i + ')">✏️ ویرایش</button>' +
-        '<button class="mini del" onclick="formDelStudent(' + i + ')">🗑️ حذف</button></div>';
-    }
-  });
-  h += '</div>';
-  /* save */
-  h += '<div style="margin-top:22px;display:flex;gap:12px;flex-wrap:wrap">' +
-    '<button class="btn lime" style="flex:1;justify-content:center;font-size:19px;padding:15px" onclick="formSave()">✓ ' + (isEdit ? 'ذخیره‌ی تغییرات' : 'ساختن کلاس') + '</button>' +
-    '<button class="btn" onclick="go(\'#/admin\')">لغو</button></div>';
-  h += '<div id="f-err"></div>';
-  return h;
+  try { history.pushState({ linglowPopup: 1 }, ''); } catch (e) {}
 }
-function formKind(k){
-  if (form.kind !== k){ form.kind = k; form.book = ''; }
-  render();
+function closeNoScorePopup(){
+  if (history.state && history.state.linglowPopup){ history.back(); return; }
+  hideNoScorePopup();
 }
-function formLevel(v){ form.level = v; }
-function formBook(b){ form.book = b; render(); }
-function formAddStudent(){
-  const nameEl = document.getElementById('f-stu-name');
-  const scoreEl = document.getElementById('f-stu-score');
-  const name = (nameEl.value || '').trim();
-  const err = document.getElementById('f-stu-err');
-  if (!name){ err.innerHTML = '<div class="err">اسم دانش‌آموز رو بنویس.</div>'; return; }
-  let score = null;
-  if (scoreEl.value !== '' && scoreEl.value != null){
-    score = Number(scoreEl.value);
-    if (isNaN(score) || score < 0 || score > 100){ err.innerHTML = '<div class="err">نمره باید بین ۰ تا ۱۰۰ باشه.</div>'; return; }
-  }
-  form.students.push({ id: uid(), name, score, _edit: false });
-  render();
+function hideNoScorePopup(){
+  const root = document.getElementById('modal-root');
+  if (root) root.innerHTML = '';
 }
-function formEditStudent(i){ form.students[i]._edit = true; render(); setTimeout(() => { const el = document.getElementById('f-edit-name-' + i); if (el) el.focus(); }, 50); }
-function formCancelEdit(i){ form.students[i]._edit = false; render(); }
-function formSaveStudent(i){
-  const s = form.students[i];
-  const name = (document.getElementById('f-edit-name-' + i).value || '').trim();
-  const v = document.getElementById('f-edit-score-' + i).value;
-  if (!name){ alert('اسم دانش‌آموز رو بنویس.'); return; }
-  let score = null;
-  if (v !== '' && v != null){ score = Number(v); if (isNaN(score) || score < 0 || score > 100){ alert('نمره باید بین ۰ تا ۱۰۰ باشه.'); return; } }
-  s.name = name; s.score = score; s._edit = false;
-  render();
-}
-function formDelStudent(i){ form.students.splice(i, 1); render(); }
-function formSave(){
-  const err = document.getElementById('f-err');
-  const fail = m => { err.innerHTML = '<div class="err">' + m + '</div>'; window.scrollTo(0, document.body.scrollHeight); };
-  if (!form.kind) return fail('قدم ۱: نوع کلاس (بزرگسال یا نوجوان) رو انتخاب کن.');
-  if (!form.level) return fail('قدم ۲: شماره‌ی لول رو انتخاب کن.');
-  if (!form.book) return fail('قدم ۳: کتاب کلاس رو انتخاب کن.');
-  if (!form.students.length) return fail('قدم ۴: حداقل یه دانش‌آموز اضافه کن.');
-  const me = currentTeacher(); if (!me) return go('#/admin');
-  const data = { kind: form.kind, level: Number(form.level), book: form.book,
-    students: form.students.map(s => ({ id: s.id, name: s.name, score: s.score })) };
-  if (form.editingId){
-    const c = me.classes.find(x => x.id === form.editingId);
-    if (c){ c.kind = data.kind; c.level = data.level; c.book = data.book; c.students = data.students; }
-  } else {
-    me.classes.push(Object.assign({ id: uid() }, data));
-  }
-  saveDB(); form = null; go('#/admin');
-}
+window.addEventListener('popstate', function(){ hideNoScorePopup(); });
 /* ================= Router ================= */
 function render(){
   const app = document.getElementById('app');
+  if (!DB){ app.innerHTML = headerHTML(false) + '<div class="empty">⏳ در حال بارگذاری…</div>'; return; }
   const raw = (location.hash || '#/').replace(/^#\/?/, '');
   const p = raw.split('/').filter(s => s !== '');
   let html;
@@ -555,15 +382,12 @@ function render(){
   else if (p[0] === 't' && p.length === 2) html = viewTeacherClasses(decodeURIComponent(p[1]));
   else if (p[0] === 't' && p.length === 4 && p[2] === 'c') html = viewClassStudents(decodeURIComponent(p[1]), p[3]);
   else if (p[0] === 't' && p.length === 6 && p[2] === 'c' && p[4] === 's') html = viewReport(decodeURIComponent(p[1]), p[3], p[5]);
-  else if (p[0] === 'admin' && p.length === 1) html = viewAdmin();
-  else if (p[0] === 'admin' && p.length === 2 && p[1] === 'new') html = currentTeacher() ? viewClassForm(null) : viewAdmin();
-  else if (p[0] === 'admin' && p.length === 3 && p[1] === 'edit') html = currentTeacher() ? viewClassForm(p[2]) : viewAdmin();
   else html = viewHome();
   app.innerHTML = html;
   window.scrollTo(0, 0);
 }
 window.addEventListener('hashchange', render);
-render();
+refreshDB();
 </script>
 </body>
 </html>
